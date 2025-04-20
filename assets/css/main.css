@@ -386,10 +386,21 @@ button {
   background-color: rgba(59, 130, 246, 0.05);
 }
 
+.table tr:last-of-type .context-menu {
+  bottom: 100%;
+  top: auto;
+}
+
+.item-row:last-child .menu-container .context-menu,
+.item-row:nth-last-child(-n+2) .menu-container .context-menu {
+  bottom: 100%;
+  top: auto;
+  right: 0;
+  margin-bottom: 5px;
+}
+
 .actions-cell {
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
+  position: relative;
 }
 
 .context-menu-backdrop {

@@ -70,8 +70,8 @@
               <circle cx="12" cy="19" r="1" />
             </svg>
           </button>
-          <div v-if="showMenu && isTouchDevice" class="context-menu-backdrop" @click="showMenu = false"></div>
-          <div v-if="showMenu" class="context-menu">
+          <div v-if="isMenuOpen && isTouchDevice" class="context-menu-backdrop" @click="closeMenu"></div>
+          <div v-if="isMenuOpen" class="context-menu">
             <div class="context-menu-item" @click="editItem">
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M12 20h9"></path>
@@ -116,10 +116,17 @@ const props = defineProps<{
 const store = useItemsStore();
 const isDragging = ref(false);
 const isDragOver = ref(false);
-const showMenu = ref(false);
 const isTouchDevice = ref(false);
 const longPressTimer = ref(null);
 const longPressDuration = 500; // ms
+
+// Global state for active menu
+const activeMenuId = useState<number | null>('activeMenuId', () => null);
+
+// Check if the menu for this item is open
+const isMenuOpen = computed(() => {
+  return activeMenuId.value === props.item.id;
+});
 
 // Check if item has children
 const hasChildren = computed(() => {
@@ -134,13 +141,32 @@ const toggleCollapse = () => {
 // Toggle context menu
 const toggleMenu = (event: MouseEvent) => {
   event.stopPropagation(); // Prevent event bubbling
-  showMenu.value = !showMenu.value;
+  
+  // If this menu is already open, close it
+  if (isMenuOpen.value) {
+    activeMenuId.value = null;
+  } else {
+    // Otherwise close any open menu and open this one
+    activeMenuId.value = props.item.id;
+  }
+};
+
+// Close this menu
+const closeMenu = () => {
+  if (isMenuOpen.value) {
+    activeMenuId.value = null;
+  }
 };
 
 // Close menu when clicking outside
-const handleClickOutside = () => {
-  if (showMenu.value) {
-    showMenu.value = false;
+const handleClickOutside = (event: MouseEvent) => {
+  // Skip if the menu is not open
+  if (!isMenuOpen.value) return;
+  
+  // Check if the click is outside the menu
+  const target = event.target as HTMLElement;
+  if (!target.closest('.context-menu') && !target.closest('.menu-toggle')) {
+    activeMenuId.value = null;
   }
 };
 
@@ -195,7 +221,7 @@ const hideDragStatusMessage = () => {
 
 // Edit item
 const editItem = () => {
-  showMenu.value = false;
+  closeMenu();
   
   const newName = prompt('Edit item name:', props.item.name);
   if (newName && newName.trim() !== '' && newName !== props.item.name) {
@@ -205,7 +231,7 @@ const editItem = () => {
 
 // Remove item
 const removeItem = () => {
-  showMenu.value = false;
+  closeMenu();
   
   if (confirm(`Are you sure you want to remove "${props.item.name}"?`)) {
     store.removeItem(props.item.id, props.parentId);
@@ -407,8 +433,8 @@ const onDragLeave = (event: DragEvent) => {
 const onDrop = (event: DragEvent) => {
   event.preventDefault();
   
-   // Remove status classes
-   const element = event.currentTarget as HTMLElement;
+  // Remove status classes
+  const element = event.currentTarget as HTMLElement;
   if (element) {
     element.classList.remove('drag-over');
     element.classList.remove('drop-not-allowed');
@@ -475,7 +501,7 @@ const onDrop = (event: DragEvent) => {
       console.error('Error during drop handling:', e);
     }
   }
-
+  
   // Clear drag data
   draggedItem.value = null;
 };
