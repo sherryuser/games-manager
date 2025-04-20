@@ -13,6 +13,9 @@
     @dragleave="onDragLeave"
     @drop="onDrop"
     @dragend="onDragEnd"
+    @touchstart="onTouchStart"
+    @touchmove="onTouchMove"
+    @touchend="onTouchEnd"
   >
     <td>
       <div class="item-number">{{ item.displayNumber }}</div>
@@ -67,6 +70,7 @@
               <circle cx="12" cy="19" r="1" />
             </svg>
           </button>
+          <div v-if="showMenu && isTouchDevice" class="context-menu-backdrop" @click="showMenu = false"></div>
           <div v-if="showMenu" class="context-menu">
             <div class="context-menu-item" @click="editItem">
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -113,6 +117,9 @@ const store = useItemsStore();
 const isDragging = ref(false);
 const isDragOver = ref(false);
 const showMenu = ref(false);
+const isTouchDevice = ref(false);
+const longPressTimer = ref(null);
+const longPressDuration = 500; // ms
 
 // Check if item has children
 const hasChildren = computed(() => {
@@ -131,8 +138,23 @@ const toggleMenu = (event: MouseEvent) => {
 };
 
 // Close menu when clicking outside
+const handleClickOutside = () => {
+  if (showMenu.value) {
+    showMenu.value = false;
+  }
+};
+
 onMounted(() => {
   document.addEventListener('click', handleClickOutside);
+  
+  // Check if we're on a touch device
+  isTouchDevice.value = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+  
+  // Add touch events if necessary
+  if (isTouchDevice.value) {
+    // Make drag indicators more prominent for touch devices
+    document.documentElement.classList.add('touch-device');
+  }
   
   // Create status message element
   if (!document.getElementById('drag-status-message')) {
@@ -150,12 +172,6 @@ onMounted(() => {
     document.body.appendChild(statusEl);
   }
 });
-
-const handleClickOutside = () => {
-  if (showMenu.value) {
-    showMenu.value = false;
-  }
-};
 
 // Show drag status message
 const showDragStatusMessage = (text: string) => {
@@ -198,6 +214,111 @@ const removeItem = () => {
 
 // Keep track of drag data
 const draggedItem = ref<{id: number, parentId: number | null, name: string} | null>(null);
+
+// Touch event handlers
+const onTouchStart = (event: TouchEvent) => {
+  if (!isTouchDevice.value) return;
+  
+  // Start timer for long press
+  longPressTimer.value = setTimeout(() => {
+    // Handle long press as drag start
+    const touch = event.touches[0];
+    const target = event.currentTarget as HTMLElement;
+    
+    // Create a simulated drag event
+    const dragEvent = new Event('dragstart', { bubbles: true });
+    Object.defineProperty(dragEvent, 'dataTransfer', {
+      value: {
+        setData: (type: string, data: string) => {
+          // Store the data in a ref
+          draggedItem.value = JSON.parse(data);
+        },
+        effectAllowed: 'move'
+      },
+      writable: false
+    });
+    
+    // Trigger drag start
+    onDragStart(dragEvent as unknown as DragEvent);
+    
+    // Add visual feedback
+    target.classList.add('dragging');
+    
+    // Show message
+    showDragStatusMessage(`Dragging: ${props.item.name} (Touch and move to reposition)`);
+  }, longPressDuration);
+};
+
+const onTouchMove = (event: TouchEvent) => {
+  // Clear timer if user moves before long press
+  if (longPressTimer.value) {
+    clearTimeout(longPressTimer.value);
+    longPressTimer.value = null;
+  }
+  
+  // Handle touch move during drag
+  if (isDragging.value) {
+    event.preventDefault();
+    
+    const touch = event.touches[0];
+    const elementsAtPoint = document.elementsFromPoint(touch.clientX, touch.clientY);
+    
+    // Find potential drop targets
+    for (const el of elementsAtPoint) {
+      if (el instanceof HTMLElement && el.classList.contains('item-row') && !el.classList.contains('dragging')) {
+        // Clear previous drag-over states
+        document.querySelectorAll('.drag-over').forEach(el => {
+          el.classList.remove('drag-over');
+        });
+        
+        // Add drag-over to this element
+        el.classList.add('drag-over');
+        break;
+      }
+    }
+  }
+};
+
+const onTouchEnd = (event: TouchEvent) => {
+  // Clear timer if touch ends
+  if (longPressTimer.value) {
+    clearTimeout(longPressTimer.value);
+    longPressTimer.value = null;
+  }
+  
+  // Handle touch end during drag
+  if (isDragging.value && event.changedTouches && event.changedTouches.length > 0) {
+    const elementsAtPoint = document.elementsFromPoint(
+      event.changedTouches[0].clientX, 
+      event.changedTouches[0].clientY
+    );
+    
+    // Find drop target
+    for (const el of elementsAtPoint) {
+      if (el instanceof HTMLElement && el.classList.contains('item-row') && !el.classList.contains('dragging')) {
+        // Create a simulated drop event
+        const dropEvent = new Event('drop', { bubbles: true });
+        Object.defineProperty(dropEvent, 'dataTransfer', {
+          value: {
+            getData: () => JSON.stringify(draggedItem.value)
+          },
+          writable: false
+        });
+        
+        // Dispatch event on the target
+        el.dispatchEvent(dropEvent as unknown as DragEvent);
+        break;
+      }
+    }
+    
+    // End drag
+    isDragging.value = false;
+    document.querySelectorAll('.dragging, .drag-over').forEach(el => {
+      el.classList.remove('dragging');
+      el.classList.remove('drag-over');
+    });
+  }
+};
 
 // Drag and drop functionality
 const onDragStart = (event: DragEvent) => {
@@ -250,9 +371,9 @@ const onDragOver = (event: DragEvent) => {
       }
       
       // More specific message based on the context
-      if (isChild && draggedItem.value.parentId === null) {
+      if (props.isChild && draggedItem.value.parentId === null) {
         showDragStatusMessage(`Cannot move main category into a subcategory`);
-      } else if (!isChild && draggedItem.value.parentId !== null) {
+      } else if (!props.isChild && draggedItem.value.parentId !== null) {
         showDragStatusMessage(`Cannot move subcategory to main level`);
       } else {
         showDragStatusMessage(`Items can only be reordered within their parent category`);
@@ -286,8 +407,8 @@ const onDragLeave = (event: DragEvent) => {
 const onDrop = (event: DragEvent) => {
   event.preventDefault();
   
-  // Remove status classes
-  const element = event.currentTarget as HTMLElement;
+   // Remove status classes
+   const element = event.currentTarget as HTMLElement;
   if (element) {
     element.classList.remove('drag-over');
     element.classList.remove('drop-not-allowed');
@@ -354,7 +475,7 @@ const onDrop = (event: DragEvent) => {
       console.error('Error during drop handling:', e);
     }
   }
-  
+
   // Clear drag data
   draggedItem.value = null;
 };
@@ -379,5 +500,11 @@ const onDragEnd = () => {
 // Cleanup event listeners
 onBeforeUnmount(() => {
   document.removeEventListener('click', handleClickOutside);
+  
+  // Clear any pending timers
+  if (longPressTimer.value) {
+    clearTimeout(longPressTimer.value);
+    longPressTimer.value = null;
+  }
 });
 </script>
